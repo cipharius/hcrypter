@@ -12,7 +12,12 @@
         name = "hcrypter";
         src = self;
         buildInputs = [
-          (haskellPackages.ghcWithPackages (pkgs: [ pkgs.cryptonite ]))
+          (haskellPackages.ghcWithPackages (pkgs: with pkgs; [
+            cryptonite
+            bytestring
+            bits-bytestring
+            cmdargs
+          ]))
         ];
         buildPhase = "ghc -v -o hcrypter -ilib ./app/Main.hs";
         installPhase = "mkdir -p $out/bin; install -t $out/bin hcrypter";

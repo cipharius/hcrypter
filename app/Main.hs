@@ -1,6 +1,12 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 module Main where
 
-import Test.Lib (test)
+import System.Console.CmdArgs
+import Cryptography
+
+data Sample = Sample { hello :: String }
+              deriving (Show, Data, Typeable)
 
 main :: IO ()
-main = putStrLn test
+main = print =<< cmdArgs sample
