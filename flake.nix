@@ -13,10 +13,10 @@
         src = self;
         buildInputs = [
           (haskellPackages.ghcWithPackages (pkgs: with pkgs; [
-            cryptonite
-            bytestring
             bits-bytestring
-            cmdargs
+            bytestring
+            cryptonite
+            optparse-applicative
           ]))
         ];
         buildPhase = "ghc -v -o hcrypter -ilib ./app/Main.hs";
