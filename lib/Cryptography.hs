@@ -64,36 +64,31 @@ cipherInit cipherType key =
 
 encrypt :: (BlockCipher cMac, BlockCipher c) =>
            SystemDRG -> CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
-encrypt drg mode maybeCipherMac cipher plainText = do
-  let
-    macMetaByte = maybe zeroBits (BA.singleton . toEnum . CC.blockSize) maybeCipherMac
+encrypt _ CipherModeCBC _ cipher plainText = cbcEncrypt cipher plainText
+encrypt drg CipherModeOFB maybeCipherMac cipher plainText = do
+  let macMetaByte = maybe zeroBits (BA.singleton . toEnum . CC.blockSize) maybeCipherMac
 
   mac <- case maybeCipherMac of
     Just cipherMac -> omac cipherMac plainText
     Nothing        -> return ""
 
-  case mode of
-    CipherModeCBC ->
-      ((macMetaByte <> mac) <>) <$> cbcEncrypt cipher plainText
-    CipherModeOFB ->
-      ((macMetaByte <> (iv `xor` mac) <> iv) <>) <$> ofbMode cipher iv plainText
-      where (iv, _) = randomBytesGenerate (CC.blockSize cipher) drg
+  let (iv, _) = randomBytesGenerate (CC.blockSize cipher) drg
+  ((macMetaByte <> (iv `xor` mac) <> iv) <>) <$> ofbMode cipher iv plainText
 
 decrypt :: (BlockCipher cMac, BlockCipher c) =>
            CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
-decrypt mode maybeCipherMac cipher cipherText = do
+decrypt CipherModeCBC _ cipher plainText = cbcDecrypt cipher plainText
+decrypt CipherModeOFB maybeCipherMac cipher cipherText = do
   (macMetaByte, cipherMessage) <-
     case BA.uncons cipherText of
       Just (byte, rest) -> Right (fromEnum byte, rest)
       Nothing           -> Left ErrorShortCipherText
 
-  let (xoredMacPart, ivCipherTextPart) = BA.splitAt macMetaByte cipherMessage
+  let
+    (xoredMacPart, ivCipherTextPart) = BA.splitAt macMetaByte cipherMessage
+    (iv, cipherTextPart) = BA.splitAt (CC.blockSize cipher) ivCipherTextPart
 
-  (macPart, plainText) <-
-    case mode of
-      CipherModeCBC -> (,) xoredMacPart <$> cbcDecrypt cipher ivCipherTextPart
-      CipherModeOFB -> (,) (iv `xor` xoredMacPart) <$> ofbMode cipher iv cipherTextPart
-        where (iv, cipherTextPart) = BA.splitAt (CC.blockSize cipher) ivCipherTextPart
+  (macPart, plainText) <- (,) (iv `xor` xoredMacPart) <$> ofbMode cipher iv cipherTextPart
 
   let macPartLength = BA.length macPart
   case maybeCipherMac of
