@@ -2,18 +2,82 @@
 
 module Cryptography where
 
-import Crypto.Cipher.Types  (BlockCipher)
-import Data.ByteArray       (ByteArray, xor)
-import Data.ByteString      (ByteString)
-import Data.String          (IsString)
-import Data.Bits            (shift, bit, setBit, (.|.))
+import Crypto.Cipher.Types   (BlockCipher)
+import Crypto.Cipher.AES     (AES128)
+import Data.ByteArray        (ByteArray, xor)
+import Data.ByteString       (ByteString)
+import Data.ByteString.Char8 (stripSuffix)
+import Data.String           (IsString)
+import Data.Bits             (shift, zeroBits, bit, setBit, (.|.))
+import Data.Char             (toLower, isSpace)
+import Cli                   (CipherMode(..))
 
 import qualified Crypto.Cipher.Types as CC
+import qualified Crypto.Error        as CE
 import qualified Data.ByteArray      as BA
 
 import Data.Bits.ByteString
 import Types
 import ByteUtils
+
+readKey :: FilePath -> IO (Either Error ByteString)
+readKey = fmap (fromHex . filter nonWhiteSpace . fmap toLower) . readFile
+  where
+    nonWhiteSpace char = not $ isSpace char
+
+cipher :: ByteString -> Either Error AES128
+cipher key = case CC.cipherInit key of
+  CE.CryptoPassed ciph -> Right ciph
+  CE.CryptoFailed err  -> Left $ ErrorCipherFail err
+
+encrypt :: (BlockCipher cMac, BlockCipher c) =>
+           CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
+encrypt mode maybeCipherMac cipher plainText = do
+  let
+    macMetaByte = maybe zeroBits (BA.singleton . toEnum . CC.blockSize) maybeCipherMac
+    encrypt' = case mode of
+      CipherModeCBC -> cbcEncrypt
+      CipherModeOFB -> ofbMode
+
+  mac <- case maybeCipherMac of
+    Just cipherMac -> omac cipherMac plainText
+    Nothing        -> return ""
+
+  cipherText <- encrypt' cipher plainText
+
+  return $ macMetaByte <> mac <> cipherText
+
+decrypt :: (BlockCipher cMac, BlockCipher c) =>
+           CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
+decrypt mode maybeCipherMac cipher cipherText = do
+  (macMetaByte, cipherMessage) <-
+    case BA.uncons cipherText of
+      Just (byte, rest) -> Right (fromEnum byte, rest)
+      Nothing           -> Left ErrorShortCipherText
+
+  let
+    (macPart, cipherTextPart) = BA.splitAt macMetaByte cipherMessage
+    macPartLength = BA.length macPart
+    decrypt' = case mode of
+      CipherModeCBC -> cbcDecrypt
+      CipherModeOFB -> ofbMode
+
+  plainText <- decrypt' cipher cipherTextPart
+
+  case maybeCipherMac of
+    Nothing
+      | macMetaByte /= 0 -> Left ErrorNoMacKey
+      | otherwise        -> return plainText
+    Just cipherMac
+      | macMetaByte /= CC.blockSize cipherMac -> Left ErrorMacMismatch
+      | macPartLength < macMetaByte           -> Left ErrorShortCipherText
+      | otherwise                             -> do
+        macControl <- omac cipherMac plainText
+
+        if macPart == macControl
+          then return plainText
+          else Left ErrorMacMismatch
+
 
 constCbcIv :: ByteString
 constCbcIv = fromHexUnsafe "0ac701bf360252f019e4855d4e0e67c9"
@@ -84,6 +148,33 @@ cbcDecrypt cipher ciphertext
 
         partialLen = BA.length partial
         (block, partial) = BA.splitAt blockSize txt
+
+-- ofbEncrypt :: (BlockCipher c, BlockCipher cM) =>
+--               Maybe cM -> c -> ByteString -> Either Error ByteString
+-- ofbEncrypt Nothing cipher plainText          = ofbMode cipher plainText
+-- ofbEncrypt (Just macCipher) cipher plainText = msgOmac <> msgCipherText
+--   where
+--     msgCipherText = ofbMode cipher plainText
+--     msgOmac = omac macCipher plainText
+
+-- ofbDecrypt :: (BlockCipher c, BlockCipher cM) =>
+--               Maybe cM -> c -> ByteString -> Either Error ByteString
+-- ofbDecrypt Nothing cipher cipherText          = ofbMode cipher cipherText
+-- ofbDecrypt (Just macCipher) cipher cipherText
+--   | inputLength < minLength = Left $ ErrorShortInput minLength inputLength
+--   | otherwise               =
+--     case ofbMode cipher cipherTextPart of
+--       Left err        -> Left err
+--       Right plainText ->
+--         case omac macCipher plainText of
+--           Left err                  -> Left err
+--           Right macControl
+--             | macPart == macControl -> Right plainText
+--             | otherwise             -> Left ErrorMacMismatch
+--   where
+--     (macPart, cipherTextPart) = BA.splitAt (CC.blockSize macCipher) cipherText
+--     inputLength = BA.length cipherText
+--     minLength = CC.blockSize cipher + CC.blockSize macCipher
 
 ofbMode :: BlockCipher c => c -> ByteString -> Either Error ByteString
 ofbMode cipher txt
