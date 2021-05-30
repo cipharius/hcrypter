@@ -31,14 +31,14 @@ hcrypter opts = computation >>= resultHandler
       key <- ExceptT $ Crypt.readKey (Cli.cryptKeyPath opt)
 
       let cipherType = Cli.cryptCipherType opt
-      cipher <- ExceptT . return $ Crypt.cipher cipherType key
+      cipher <- ExceptT . return $ Crypt.cipherInit cipherType key
 
       macCipher <-
         case Cli.cryptMacKeyPath opt of
           Nothing         -> ExceptT . return $ Right Nothing
           Just macKeyPath -> do
             macKey <- ExceptT $ Crypt.readKey macKeyPath
-            result <- ExceptT . return $ Crypt.cipher cipherType macKey
+            result <- ExceptT . return $ Crypt.cipherInit cipherType macKey
             return $ Just result
 
       let
@@ -57,14 +57,14 @@ hcrypter opts = computation >>= resultHandler
       key <- ExceptT $ Crypt.readKey (Cli.cryptKeyPath opt)
 
       let cipherType = Cli.cryptCipherType opt
-      cipher <- ExceptT . return $ Crypt.cipher cipherType key
+      cipher <- ExceptT . return $ Crypt.cipherInit cipherType key
 
       macCipher <-
         case Cli.cryptMacKeyPath opt of
           Nothing         -> ExceptT . return $ Right Nothing
           Just macKeyPath -> do
             macKey <- ExceptT $ Crypt.readKey macKeyPath
-            result <- ExceptT . return $ Crypt.cipher cipherType macKey
+            result <- ExceptT . return $ Crypt.cipherInit cipherType macKey
             return $ Just result
 
       let

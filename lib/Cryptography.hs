@@ -3,7 +3,7 @@
 
 module Cryptography
 ( readKey
-, cipher
+, cipherInit
 , encrypt
 , decrypt
 ) where
@@ -12,12 +12,11 @@ import Control.Exception     (IOException, catch)
 import Crypto.Cipher.Types   (Cipher, BlockCipher)
 import Crypto.Error          (CryptoFailable)
 import Crypto.Cipher.AES     (AES128, AES192, AES256)
-import Crypto.Random         (Seed, SystemDRG, randomBytesGenerate)
-import Data.ByteArray        (ByteArray, xor)
+import Crypto.Random         (SystemDRG, randomBytesGenerate)
+import Data.ByteArray        (xor)
 import Data.ByteString       (ByteString)
-import Data.ByteString.Char8 (stripSuffix)
-import Data.String           (IsString)
-import Data.Bits             (shift, zeroBits, bit, setBit, (.|.))
+import Data.Bits             (shift, zeroBits)
+import Data.Bits.ByteString  ()
 import Data.Char             (toLower, isSpace)
 import Cli                   (CipherMode(..), CipherType(..))
 
@@ -25,7 +24,6 @@ import qualified Crypto.Cipher.Types as CC
 import qualified Crypto.Error        as CE
 import qualified Data.ByteArray      as BA
 
-import Data.Bits.ByteString
 import Types
 import ByteUtils
 
@@ -52,8 +50,8 @@ readKey path = (fmap (fromHex . filter nonWhiteSpace . fmap toLower) . readFile 
     handleExists :: IOException -> IO (Either Error ByteString)
     handleExists _ = return . Left $ ErrorFileRead path
 
-cipher :: CipherType -> ByteString -> Either Error AbstractCipher
-cipher cipherType key =
+cipherInit :: CipherType -> ByteString -> Either Error AbstractCipher
+cipherInit cipherType key =
   case abstractCipherInit of
     CE.CryptoPassed ciph -> Right ciph
     CE.CryptoFailed err  -> Left $ ErrorCipherFail err
@@ -89,12 +87,7 @@ decrypt mode maybeCipherMac cipher cipherText = do
       Just (byte, rest) -> Right (fromEnum byte, rest)
       Nothing           -> Left ErrorShortCipherText
 
-  let
-    (xoredMacPart, ivCipherTextPart) = BA.splitAt macMetaByte cipherMessage
-    (ivPart, cipherTextPart) =
-      case mode of
-        CipherModeCBC -> ("", ivCipherTextPart)
-        CipherModeOFB -> BA.splitAt (CC.blockSize cipher) ivCipherTextPart
+  let (xoredMacPart, ivCipherTextPart) = BA.splitAt macMetaByte cipherMessage
 
   (macPart, plainText) <-
     case mode of
@@ -120,10 +113,10 @@ decrypt mode maybeCipherMac cipher cipherText = do
 
 cbcEncrypt :: BlockCipher c => c -> ByteString -> Either Error ByteString
 cbcEncrypt cipher plainText
-  | fullBlockCount == 0 = Left $ ErrorLessThanBlock blockSize
   | isBlockAligned      = Right $ encrypt' constCbcIv plainText
   | fullBlockCount > 1  = Right $ ciphertext <> ciphertextTail
   | fullBlockCount == 1 = Right $ cipherSteal' constCbcIv tailPart
+  | otherwise           = Left $ ErrorLessThanBlock blockSize
   where
     ciphertext = encrypt' constCbcIv alignedPart
     ciphertextTail = cipherSteal' ciphertextLastBlock tailPart
@@ -155,10 +148,10 @@ cbcEncrypt cipher plainText
 
 cbcDecrypt :: BlockCipher c => c -> ByteString -> Either Error ByteString
 cbcDecrypt cipher ciphertext
-  | fullBlockCount == 0 = Left $ ErrorLessThanBlock blockSize
   | isBlockAligned      = Right $ decrypt' constCbcIv ciphertext
   | fullBlockCount > 1  = Right $ decrypt' constCbcIv alignedPart <> stolenTail
   | fullBlockCount == 1 = Right $ cipherSteal' constCbcIv tailPart
+  | otherwise           = Left $ ErrorLessThanBlock blockSize
   where
     stolenTail = cipherSteal' lastAlignedBlock tailPart
     lastAlignedBlock = BA.drop (BA.length alignedPart - blockSize) alignedPart
@@ -192,8 +185,6 @@ ofbMode cipher iv txt
   where
     blockSize = CC.blockSize cipher
     inputLength = BA.length txt
-
-    isBlockAligned = (inputLength `mod` blockSize) == 0
     fullBlockCount = inputLength `div` blockSize
 
     chain' :: ByteString -> ByteString -> ByteString
@@ -226,25 +217,26 @@ omac cipher msg
     k0 = CC.ecbEncrypt cipher (BA.zero blockSize)
 
     k1 :: ByteString
-    k1 = case msb k0 of
-      0 -> k0 `shift` 1
-      1 -> (k0 `shift` 1) `xor` c
+    k1 = if msb k0
+      then (k0 `shift` 1) `xor` c
+      else k0 `shift` 1
 
     k2 :: ByteString
-    k2 = case msb k1 of
-      0 -> k1 `shift` 1
-      1 -> (k1 `shift` 1) `xor` c
+    k2 = if msb k1
+      then (k1 `shift` 1) `xor` c
+      else k1 `shift` 1
 
     c :: ByteString
     c = case blockSize of
       8  -> fromHexUnsafe "000000000000001b"
       16 -> fromHexUnsafe "00000000000000000000000000000087"
       32 -> fromHexUnsafe "0000000000000000000000000000000000000000000000000000000000000425"
+      _  -> undefined
 
     normalize :: ByteString -> ByteString
     normalize bytes = BA.pack . mappend ((0x80:) . replicate (blockSize - len - 1) $ 0) . BA.unpack $ bytes
       where len = BA.length bytes
 
     (msgTail, lastBlock) = BA.splitAt lastBlockBoundary msg
-    lastBlockBoundary = blockSize * (ceiling (fromIntegral (BA.length msg) / fromIntegral blockSize) - 1)
+    lastBlockBoundary = blockSize * (ceiling (fromIntegral (BA.length msg) / fromIntegral blockSize :: Double) - 1)
     blockSize = CC.blockSize cipher

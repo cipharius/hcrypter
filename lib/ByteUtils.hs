@@ -6,8 +6,8 @@ module ByteUtils
 ) where
 
 import Data.Char       (ord, toLower)
-import Data.Word       (Word8, Word16, Word32)
-import Data.Bits       (Bits, shift, (.&.), (.|.), rotate)
+import Data.Word       (Word8)
+import Data.Bits       (shift, (.&.), (.|.), rotate)
 import Data.ByteString (ByteString)
 import Data.ByteArray  (ByteArray)
 
@@ -39,6 +39,7 @@ fromHex hex
       by <- f y
       rest <- fromHex' mrest
       Just $ BS.singleton (bx `shift` 4 .|. by) <> rest
+    fromHex' _ = Nothing
 
     f :: Char -> Maybe Word8
     f x
@@ -49,5 +50,5 @@ fromHex hex
 fromHexUnsafe :: String -> ByteString
 fromHexUnsafe = either (\e -> error . show $ e) id . fromHex
 
-msb :: ByteArray ba => ba -> Int
-msb = fromEnum . (.&. 1) . (`rotate` 1) . head . BA.unpack . BA.take 1
+msb :: ByteArray ba => ba -> Bool
+msb = (> 0) . (.&. 1) . (`rotate` 1) . head . BA.unpack . BA.take 1

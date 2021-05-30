@@ -19,7 +19,7 @@
             optparse-applicative
           ]))
         ];
-        buildPhase = "ghc -v -o hcrypter -ilib ./app/Main.hs";
+        buildPhase = "ghc -v -Wall -Werror -o hcrypter -ilib ./app/Main.hs";
         installPhase = "mkdir -p $out/bin; install -t $out/bin hcrypter";
       };
   };
