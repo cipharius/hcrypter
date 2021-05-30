@@ -2,7 +2,6 @@ module Types
 ( Error(..)
 ) where
 
-import Data.Word (Word8, Word16, Word32)
 import Crypto.Error (CryptoError)
 
 data Error
@@ -13,6 +12,7 @@ data Error
   | ErrorShortCipherText
   | ErrorNoMacKey
   | ErrorMacMismatch
+  | ErrorFileRead FilePath
 
 instance Show Error where
   show e =
@@ -24,3 +24,4 @@ instance Show Error where
       ErrorShortCipherText -> "Input string is too short to decrypt"
       ErrorNoMacKey        -> "Message has MAC, but no MAC key provided"
       ErrorMacMismatch     -> "Message authentication code mismatch"
+      ErrorFileRead x      -> "Could not read from file (" <> x <> ")"

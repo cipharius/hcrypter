@@ -49,18 +49,5 @@ fromHex hex
 fromHexUnsafe :: String -> ByteString
 fromHexUnsafe = either (\e -> error . show $ e) id . fromHex
 
--- bytesToBlock :: ByteArray ba => ba -> Maybe Block
--- bytesToBlock = bytesToBlock'. BA.unpack
---   where
---     bytesToBlock' [w1]       = Just . Block8  $ w1
---     bytesToBlock' [w2,w1]    = Just . Block16 $ (fromIntegral w2 `shift` 8) .|. fromIntegral w1
---     bytesToBlock' [w3,w2,w1] = Just . Block32 $ (fromIntegral w3 `shift` 16) .|. (fromIntegral w2 `shift` 8) .|. fromIntegral w1
---     bytesToBlock' _          = Nothing
-
--- blockToBytes :: ByteArray ba => Block -> ba
--- blockToBytes (Block8 w) = BA.pack [w]
--- blockToBytes (Block16 w) = BA.pack . fmap (fromIntegral . (.&. 0xff)) $ [w `shift` (-8), w]
--- blockToBytes (Block32 w) = BA.pack . fmap (fromIntegral . (.&. 0xff)) $ [w `shift` (-24), w `shift` (-16), w `shift` (-8), w]
-
 msb :: ByteArray ba => ba -> Int
 msb = fromEnum . (.&. 1) . (`rotate` 1) . head . BA.unpack . BA.take 1

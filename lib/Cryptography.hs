@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 module Cryptography
 ( readKey
@@ -7,16 +8,18 @@ module Cryptography
 , decrypt
 ) where
 
-import Crypto.Cipher.Types   (BlockCipher)
-import Crypto.Cipher.AES     (AES128)
-import Crypto.Random         (SystemDRG, randomBytesGenerate)
+import Control.Exception     (IOException, catch)
+import Crypto.Cipher.Types   (Cipher, BlockCipher)
+import Crypto.Error          (CryptoFailable)
+import Crypto.Cipher.AES     (AES128, AES192, AES256)
+import Crypto.Random         (Seed, SystemDRG, randomBytesGenerate)
 import Data.ByteArray        (ByteArray, xor)
 import Data.ByteString       (ByteString)
 import Data.ByteString.Char8 (stripSuffix)
 import Data.String           (IsString)
 import Data.Bits             (shift, zeroBits, bit, setBit, (.|.))
 import Data.Char             (toLower, isSpace)
-import Cli                   (CipherMode(..))
+import Cli                   (CipherMode(..), CipherType(..))
 
 import qualified Crypto.Cipher.Types as CC
 import qualified Crypto.Error        as CE
@@ -26,15 +29,40 @@ import Data.Bits.ByteString
 import Types
 import ByteUtils
 
+data AbstractCipher = forall c. BlockCipher c => AbstractCipher c
+
+instance Cipher AbstractCipher where
+  cipherName (AbstractCipher cipher) = CC.cipherName cipher
+  cipherKeySize (AbstractCipher cipher) = CC.cipherKeySize cipher
+  cipherInit = undefined
+
+instance BlockCipher AbstractCipher where
+  blockSize (AbstractCipher cipher) = CC.blockSize cipher
+  ecbEncrypt (AbstractCipher cipher) = CC.ecbEncrypt cipher
+  ecbDecrypt (AbstractCipher cipher) = CC.ecbDecrypt cipher
+
+constCbcIv :: ByteString
+constCbcIv = fromHexUnsafe "0ac701bf360252f019e4855d4e0e67c9"
+
 readKey :: FilePath -> IO (Either Error ByteString)
-readKey = fmap (fromHex . filter nonWhiteSpace . fmap toLower) . readFile
+readKey path = (fmap (fromHex . filter nonWhiteSpace . fmap toLower) . readFile $ path) `catch` handleExists
   where
     nonWhiteSpace char = not $ isSpace char
 
-cipher :: ByteString -> Either Error AES128
-cipher key = case CC.cipherInit key of
-  CE.CryptoPassed ciph -> Right ciph
-  CE.CryptoFailed err  -> Left $ ErrorCipherFail err
+    handleExists :: IOException -> IO (Either Error ByteString)
+    handleExists _ = return . Left $ ErrorFileRead path
+
+cipher :: CipherType -> ByteString -> Either Error AbstractCipher
+cipher cipherType key =
+  case abstractCipherInit of
+    CE.CryptoPassed ciph -> Right ciph
+    CE.CryptoFailed err  -> Left $ ErrorCipherFail err
+  where
+    abstractCipherInit =
+      case cipherType of
+        CipherAES128 -> AbstractCipher <$> (CC.cipherInit key :: CryptoFailable AES128)
+        CipherAES192 -> AbstractCipher <$> (CC.cipherInit key :: CryptoFailable AES192)
+        CipherAES256 -> AbstractCipher <$> (CC.cipherInit key :: CryptoFailable AES256)
 
 encrypt :: (BlockCipher cMac, BlockCipher c) =>
            SystemDRG -> CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
@@ -89,9 +117,6 @@ decrypt mode maybeCipherMac cipher cipherText = do
           then return plainText
           else Left ErrorMacMismatch
 
-
-constCbcIv :: ByteString
-constCbcIv = fromHexUnsafe "0ac701bf360252f019e4855d4e0e67c9"
 
 cbcEncrypt :: BlockCipher c => c -> ByteString -> Either Error ByteString
 cbcEncrypt cipher plainText
