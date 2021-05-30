@@ -1,5 +1,5 @@
 module Main where
-    
+
 import qualified Data.ByteString as ByteString
 import qualified Cryptography as Crypt
 import qualified Cli
@@ -9,6 +9,7 @@ import Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import System.Exit                (exitSuccess, die)
 import Data.Maybe                 (fromMaybe)
 import Crypto.Cipher.AES          (AES128)
+import Crypto.Random              (getSystemDRG)
 
 import Types (Error)
 import Cli   (Options, Command)
@@ -42,7 +43,8 @@ hcrypter opts = computation >>= resultHandler
         outPath = fromMaybe (inPath <> ".out") (Cli.cryptOutFile opt)
 
       message <- liftIO $ ByteString.readFile inPath
-      cipherText <- ExceptT . return $ Crypt.encrypt mode macCipher cipher message
+      systemDrg <- liftIO getSystemDRG
+      cipherText <- ExceptT . return $ Crypt.encrypt systemDrg mode macCipher cipher message
 
       liftIO $ ByteString.writeFile outPath cipherText
 

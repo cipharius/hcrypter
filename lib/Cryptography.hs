@@ -1,9 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Cryptography where
+module Cryptography
+( readKey
+, cipher
+, encrypt
+, decrypt
+) where
 
 import Crypto.Cipher.Types   (BlockCipher)
 import Crypto.Cipher.AES     (AES128)
+import Crypto.Random         (SystemDRG, randomBytesGenerate)
 import Data.ByteArray        (ByteArray, xor)
 import Data.ByteString       (ByteString)
 import Data.ByteString.Char8 (stripSuffix)
@@ -31,21 +37,21 @@ cipher key = case CC.cipherInit key of
   CE.CryptoFailed err  -> Left $ ErrorCipherFail err
 
 encrypt :: (BlockCipher cMac, BlockCipher c) =>
-           CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
-encrypt mode maybeCipherMac cipher plainText = do
+           SystemDRG -> CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
+encrypt drg mode maybeCipherMac cipher plainText = do
   let
     macMetaByte = maybe zeroBits (BA.singleton . toEnum . CC.blockSize) maybeCipherMac
-    encrypt' = case mode of
-      CipherModeCBC -> cbcEncrypt
-      CipherModeOFB -> ofbMode
 
   mac <- case maybeCipherMac of
     Just cipherMac -> omac cipherMac plainText
     Nothing        -> return ""
 
-  cipherText <- encrypt' cipher plainText
-
-  return $ macMetaByte <> mac <> cipherText
+  case mode of
+    CipherModeCBC ->
+      ((macMetaByte <> mac) <>) <$> cbcEncrypt cipher plainText
+    CipherModeOFB ->
+      ((macMetaByte <> (iv `xor` mac) <> iv) <>) <$> ofbMode cipher iv plainText
+      where (iv, _) = randomBytesGenerate (CC.blockSize cipher) drg
 
 decrypt :: (BlockCipher cMac, BlockCipher c) =>
            CipherMode -> Maybe cMac -> c -> ByteString -> Either Error ByteString
@@ -56,14 +62,19 @@ decrypt mode maybeCipherMac cipher cipherText = do
       Nothing           -> Left ErrorShortCipherText
 
   let
-    (macPart, cipherTextPart) = BA.splitAt macMetaByte cipherMessage
-    macPartLength = BA.length macPart
-    decrypt' = case mode of
-      CipherModeCBC -> cbcDecrypt
-      CipherModeOFB -> ofbMode
+    (xoredMacPart, ivCipherTextPart) = BA.splitAt macMetaByte cipherMessage
+    (ivPart, cipherTextPart) =
+      case mode of
+        CipherModeCBC -> ("", ivCipherTextPart)
+        CipherModeOFB -> BA.splitAt (CC.blockSize cipher) ivCipherTextPart
 
-  plainText <- decrypt' cipher cipherTextPart
+  (macPart, plainText) <-
+    case mode of
+      CipherModeCBC -> (,) xoredMacPart <$> cbcDecrypt cipher ivCipherTextPart
+      CipherModeOFB -> (,) (iv `xor` xoredMacPart) <$> ofbMode cipher iv cipherTextPart
+        where (iv, cipherTextPart) = BA.splitAt (CC.blockSize cipher) ivCipherTextPart
 
+  let macPartLength = BA.length macPart
   case maybeCipherMac of
     Nothing
       | macMetaByte /= 0 -> Left ErrorNoMacKey
@@ -149,37 +160,10 @@ cbcDecrypt cipher ciphertext
         partialLen = BA.length partial
         (block, partial) = BA.splitAt blockSize txt
 
--- ofbEncrypt :: (BlockCipher c, BlockCipher cM) =>
---               Maybe cM -> c -> ByteString -> Either Error ByteString
--- ofbEncrypt Nothing cipher plainText          = ofbMode cipher plainText
--- ofbEncrypt (Just macCipher) cipher plainText = msgOmac <> msgCipherText
---   where
---     msgCipherText = ofbMode cipher plainText
---     msgOmac = omac macCipher plainText
-
--- ofbDecrypt :: (BlockCipher c, BlockCipher cM) =>
---               Maybe cM -> c -> ByteString -> Either Error ByteString
--- ofbDecrypt Nothing cipher cipherText          = ofbMode cipher cipherText
--- ofbDecrypt (Just macCipher) cipher cipherText
---   | inputLength < minLength = Left $ ErrorShortInput minLength inputLength
---   | otherwise               =
---     case ofbMode cipher cipherTextPart of
---       Left err        -> Left err
---       Right plainText ->
---         case omac macCipher plainText of
---           Left err                  -> Left err
---           Right macControl
---             | macPart == macControl -> Right plainText
---             | otherwise             -> Left ErrorMacMismatch
---   where
---     (macPart, cipherTextPart) = BA.splitAt (CC.blockSize macCipher) cipherText
---     inputLength = BA.length cipherText
---     minLength = CC.blockSize cipher + CC.blockSize macCipher
-
-ofbMode :: BlockCipher c => c -> ByteString -> Either Error ByteString
-ofbMode cipher txt
+ofbMode :: BlockCipher c => c -> ByteString -> ByteString -> Either Error ByteString
+ofbMode cipher iv txt
   | fullBlockCount == 0 = Left $ ErrorLessThanBlock blockSize
-  | otherwise           = Right $ chain' constCbcIv txt
+  | otherwise           = Right $ chain' iv txt
   where
     blockSize = CC.blockSize cipher
     inputLength = BA.length txt
@@ -233,7 +217,7 @@ omac cipher msg
       32 -> fromHexUnsafe "0000000000000000000000000000000000000000000000000000000000000425"
 
     normalize :: ByteString -> ByteString
-    normalize bytes = BA.pack . mappend ((0x80:) . take (blockSize - len - 1) . repeat $ 0) . BA.unpack $ bytes
+    normalize bytes = BA.pack . mappend ((0x80:) . replicate (blockSize - len - 1) $ 0) . BA.unpack $ bytes
       where len = BA.length bytes
 
     (msgTail, lastBlock) = BA.splitAt lastBlockBoundary msg
