@@ -2,7 +2,7 @@
   description = "Applied cryptography - assignment 1, block ciphers and chaining modes";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-20.09";
+    nixpkgs.url = "github:cipharius/nixpkgs/static-haskell-patch";
   };
 
   outputs = { self, nixpkgs }: {
@@ -11,15 +11,29 @@
       stdenv.mkDerivation {
         name = "hcrypter";
         src = self;
+        isLibrary = false;
+        isExecutable = true;
+        enableSharedExecutables = false;
+        enableSharedLibraries = false;
         buildInputs = [
-          (haskellPackages.ghcWithPackages (pkgs: with pkgs; [
+          (pkgsMusl.haskellPackages.ghcWithPackages (pkgs: with pkgs; [
             bits-bytestring
             bytestring
             cryptonite
             optparse-applicative
           ]))
         ];
-        buildPhase = "ghc -v -Wall -Werror -o hcrypter -ilib ./app/Main.hs";
+        buildPhase = ''ghc \
+          -optl=-static \
+          -Wall \
+          -Werror \
+          -L${pkgsMusl.gmp6.override { withStatic = true; }}/lib \
+          -L${pkgsMusl.zlib.static}/lib \
+          -L${pkgsMusl.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib \
+          -o hcrypter \
+          -ilib \
+          ./app/Main.hs
+        '';
         installPhase = "mkdir -p $out/bin; install -t $out/bin hcrypter";
       };
   };

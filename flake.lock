@@ -2,16 +2,16 @@
   "nodes": {
     "nixpkgs": {
       "locked": {
-        "lastModified": 1620808985,
-        "narHash": "sha256-cf/+g1RVawT0rcKmfh2nf/lgnSrj9YZS+1PkCFmoeJQ=",
-        "owner": "nixos",
+        "lastModified": 1622639289,
+        "narHash": "sha256-zsESzVwC0DYVoURVnkHoGtqicdf6fWEOWGREN4TzQQE=",
+        "owner": "cipharius",
         "repo": "nixpkgs",
-        "rev": "327368f98c6a927a84aed3c2f2fd1a7f6983e855",
+        "rev": "33ad7407713e8b551002e01a2a2d3a9ad96bbaf0",
         "type": "github"
       },
       "original": {
-        "owner": "nixos",
-        "ref": "nixos-20.09",
+        "owner": "cipharius",
+        "ref": "static-haskell-patch",
         "repo": "nixpkgs",
         "type": "github"
       }
